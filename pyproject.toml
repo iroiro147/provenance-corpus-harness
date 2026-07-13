@@ -1,0 +1,60 @@
+[project]
+name = "provenance-corpus-harness"
+version = "0.1.0"
+description = "Provenance-first collection of operator-authorized content into portable Markdown records."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Sarthak Singh" }]
+keywords = ["corpus", "provenance", "markdown", "rss", "scraping"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+    "requests>=2.32",
+    "feedparser>=6.0",
+    "trafilatura>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "pip-audit>=2.9",
+    "pytest>=8.0",
+    "ruff>=0.12",
+    "twine>=6.0",
+]
+
+[project.scripts]
+corpus-harness = "harness.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/iroiro147/provenance-corpus-harness"
+Issues = "https://github.com/iroiro147/provenance-corpus-harness/issues"
+Repository = "https://github.com/iroiro147/provenance-corpus-harness"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["harness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
