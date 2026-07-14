@@ -1,24 +1,56 @@
 # Provenance Corpus Harness
 
-Collect text from explicit source adapters and write portable Markdown records with
-source URLs, timestamps, content hashes, and platform metadata.
+[![CI](https://github.com/iroiro147/provenance-corpus-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/iroiro147/provenance-corpus-harness/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/downloads/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-The harness is intentionally a narrow gathering layer. It does not crawl the open web,
-solve access challenges, execute downloaded content, or perform embeddings and model
-enrichment. Its output is ordinary Markdown that can be inspected, versioned, and fed
-to any downstream corpus pipeline.
+**Collect source-linked Markdown records you can inspect, diff, and audit.**
 
-## Why this exists
+Most collection scripts stop when they have the text. That is exactly where corpus
+problems begin: URLs disappear, timestamps drift, content changes silently, and nobody
+can explain which source produced which record.
 
-Corpus collection often loses the context needed to audit a dataset later. This project
-keeps provenance next to every record and gives each source adapter an offline-testable
-contract:
+Provenance Corpus Harness treats provenance as part of the record—not an afterthought in
+a log file. Explicit source adapters produce portable Markdown with the source URL,
+collection time, content hash, and platform metadata beside the collected text.
+
+```text
+FROM scraped text blobs
+TO   source-linked corpus records
+```
+
+Not a crawler. Not a vector database. A provenance-first collection layer for people
+building durable corpora from sources they are authorized to access.
+
+## The problem: provenance debt
+
+A folder of text can look like a corpus while quietly accumulating **provenance debt**:
+the missing context that makes a dataset difficult to verify, refresh, or defend later.
+If a record cannot answer where it came from, when it was collected, and whether its
+body changed, downstream enrichment only compounds the uncertainty.
+
+This harness makes that context a first-class contract:
 
 ```text
 source adapter -> CorpusItem -> <output>/<platform>/<slug>.md
 ```
 
-Included adapters:
+Every adapter is explicit. Every output is ordinary Markdown. Every collection path is
+offline-testable with injected fetchers or runners.
+
+## What you get
+
+- **Source-linked records** — source URLs, timestamps, hashes, and platform metadata live
+  beside the content.
+- **Portable output** — Markdown and YAML frontmatter work with Git, static tools, search
+  indexes, and downstream corpus pipelines.
+- **Change-aware writes** — identical bodies are skipped; changed bodies receive a stable
+  hash suffix instead of silently overwriting history.
+- **Bounded collection** — explicit adapters, clear authentication behavior, polite HTTP,
+  robots checks where applicable, and no access-control evasion.
+- **Offline-testable adapters** — the test suite does not require live network access.
+
+## Explicit source adapters
 
 - Hacker News via the public Firebase API
 - RSS and Atom feeds
@@ -27,6 +59,16 @@ Included adapters:
 - GitHub repository metadata, README files, and release notes via REST
 - Reddit public JSON where available
 - Product Hunt via its authenticated GraphQL API
+
+## Who this is for
+
+Use the harness when you are building a research corpus, retrieval system, knowledge
+base, archive, or evaluation dataset and need collection evidence to survive beyond the
+first script run.
+
+It is deliberately the wrong tool for broad crawling, access-control bypass, content
+laundering, embeddings, or model enrichment. Those are different jobs with different
+trust boundaries.
 
 ## Responsible-use boundary
 
@@ -88,7 +130,7 @@ PRODUCTHUNT_TOKEN=... corpus-harness producthunt featured --out corpus
 
 Tokens are read from the environment and are never written into corpus records.
 
-## Output contract
+## The record contract
 
 Each record is written to `<output>/<platform>/<slug>.md`:
 
@@ -114,6 +156,9 @@ Writes are atomic. An identical body at the same slug is skipped; a changed body
 the same slug receives a short hash suffix. Platform identifiers are restricted to one
 lowercase path segment, and resolved output paths must remain below the configured root.
 Treat all collected text and metadata as untrusted input in downstream systems.
+
+The result is a corpus you can reason about later—not merely a directory you happened to
+fill today.
 
 ## Architecture
 

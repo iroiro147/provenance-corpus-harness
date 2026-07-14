@@ -1,7 +1,7 @@
 [project]
 name = "provenance-corpus-harness"
 version = "0.1.0"
-description = "Provenance-first collection of operator-authorized content into portable Markdown records."
+description = "Provenance-first corpus collection into source-linked, auditable Markdown records."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
