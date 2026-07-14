@@ -50,4 +50,12 @@ not delegate URL fetching to a parser or extraction library. New crawl, browser,
 or managed-service surfaces require a separate threat model and offline adversarial
 tests.
 
+Browser adapters must not continue a preflighted URL through a second network stack;
+allowed GET responses must be fulfilled from the protected transport. Asset and media
+changes must preserve source-policy declarations, store inert bytes, enforce aggregate
+budgets, and test corruption. Account-source changes must consume verifiable exports
+only—never cookies, tokens, sessions, browser profiles, login automation, or paywall
+bypass. Evidence providers must deny remote egress by default and return source-linked
+citations rather than untraceable scores.
+
 By contributing, you agree that your contribution is licensed under Apache-2.0.

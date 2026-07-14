@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
   byte limits, cross-origin credential stripping, and protected robots retrieval.
 - URL credential detection, secret-query sanitization, canonicalization, and error
   redaction utilities.
+- Rights and authorization declarations plus content-addressed asset storage.
+- Bounded same-origin site collection and an optional controlled browser renderer.
+- Export-only source-package discovery, validation, import, and integrity verification.
+- Consent-gated direct media acquisition with strict type and byte limits.
+- Deterministic local evidence indexing, lexical retrieval, optional visual similarity,
+  portable citations, and integrity verification.
 
 ### Changed
 
@@ -23,7 +29,7 @@ All notable changes to this project are documented here. The format follows
 - Deduplication now requires the same source URL and content hash, preserving identical
   text collected from distinct sources.
 - Collision paths are validated repeatedly and never blindly overwritten.
-- Development version advanced to `0.2.0.dev0`; no v0.2 release has been published.
+- Development version advanced to `0.3.0.dev0`; no v0.2 or v0.3 release has been published.
 
 ## [0.1.0] - 2026-07-14
 
