@@ -13,15 +13,17 @@ can explain which source produced which record.
 Provenance Corpus Harness treats provenance as part of the record—not an afterthought in
 a log file. Explicit source adapters produce portable Markdown with the source URL,
 collection time, content hash, and platform metadata beside the collected text. Each run
-also produces a deterministic acquisition receipt with exact outcomes and relative paths.
+through an adapter, the site collector, or the browser renderer also produces a
+deterministic acquisition receipt with exact outcomes and relative paths.
 
 ```text
 FROM scraped text blobs
 TO   source-linked corpus records
 ```
 
-Not a crawler. Not a vector database. A provenance-first collection layer for people
-building durable corpora from sources they are authorized to access.
+A bounded collector and local evidence index—not a stealth crawler or hosted vector
+service. It is a provenance-first substrate for people building durable corpora from
+sources they are authorized to access.
 
 ## The problem: provenance debt
 
@@ -55,6 +57,16 @@ offline-testable with injected fetchers or runners.
 - **Safer remote fetches** — RSS and article fetches reject credentials and non-public
   addresses, revalidate every redirect hop, pin the resolved address, cap response bytes,
   and strip credentials on cross-origin redirects.
+- **Bounded site collection** — a same-origin frontier applies explicit page, depth,
+  byte, content-type, robots, and politeness budgets.
+- **Controlled browser rendering** — an optional browser adapter receives network bodies
+  only through the protected HTTP transport and never accepts consent or evades access.
+- **Rights-aware assets and media** — inert, content-addressed originals retain access,
+  authorization, rights, byte, hash, and source declarations.
+- **Export-only account sources** — operator-approved export packages reject recognized
+  credential/session patterns and import without browser profiles or session replay.
+- **Local evidence retrieval** — deterministic text retrieval and optional local visual
+  similarity return portable citations with exact source locators and hashes.
 
 ## Explicit source adapters
 
@@ -72,9 +84,9 @@ Use the harness when you are building a research corpus, retrieval system, knowl
 base, archive, or evaluation dataset and need collection evidence to survive beyond the
 first script run.
 
-It is deliberately the wrong tool for broad crawling, access-control bypass, content
-laundering, embeddings, or model enrichment. Those are different jobs with different
-trust boundaries.
+It is deliberately the wrong tool for unbounded crawling, access-control bypass,
+content laundering, session automation, or covert remote processing. Those are
+different jobs with different trust boundaries.
 
 ## Responsible-use boundary
 
@@ -97,6 +109,14 @@ corpus-harness --version
 ```
 
 The YouTube adapter also needs `yt-dlp` on `PATH`.
+
+Optional browser rendering and local image similarity are installed explicitly:
+
+```bash
+python -m pip install -e '.[browser]'
+playwright install chromium
+python -m pip install -e '.[multimodal]'
+```
 
 ## Usage
 
@@ -127,7 +147,53 @@ corpus-harness rss https://example.com/feed.xml --out corpus --resume
 
 # Explicitly execute again even when a receipt already exists
 corpus-harness rss https://example.com/feed.xml --out corpus --refresh
+
+# Bounded same-origin site collection; rendering is explicit and optional
+corpus-harness site https://example.com/docs --out corpus --max-pages 25 --max-depth 2
+corpus-harness site https://example.com/app --out corpus --render
+corpus-harness site-verify corpus/_provenance/site-runs/<receipt>.json --out corpus
+corpus-harness browser https://example.com/app --out corpus
+corpus-harness browser-verify corpus/_provenance/browser-runs/<receipt>.json --out corpus
+
+# Direct media stays metadata-only unless both consent and a rights policy are explicit
+corpus-harness media https://example.com/image.png --out corpus \
+  --policy ./rights-policy.json
+corpus-harness media https://example.com/image.png --out corpus \
+  --policy ./rights-policy.json --download-media
+
+# Classify a gated source before collection (exit 3 means an export is required)
+corpus-harness source check https://x.com/example
+
+# Discover, validate, import, and verify a local export package
+corpus-harness package discover ./my-export \
+  --manifest ./my-export/source-package.json \
+  --package-id my-export-2026 --policy ./rights-policy.json
+corpus-harness package validate ./my-export/source-package.json
+corpus-harness package import ./my-export/source-package.json --out imported/my-export
+corpus-harness package verify imported/my-export
+
+# Build, query, and verify a deterministic local evidence index
+corpus-harness index build --corpus corpus --out evidence-index
+corpus-harness index query evidence-index --text "source lineage"
+corpus-harness index query evidence-index --image query.png
+corpus-harness index verify evidence-index --corpus corpus
 ```
+
+A rights policy is an operator declaration, not legal proof. The minimal public-source
+form is:
+
+```json
+{
+  "rights": {"status": "public", "permitted_uses": ["local-research"]},
+  "authorization": {"basis": "public"},
+  "access_class": "public",
+  "local_only": false
+}
+```
+
+Use `account-owned-export`, `operator-approved-export`, `official-api`, or
+`licensed-dataset` only with the corresponding evidence. Paid, private, and
+unknown-rights sources must remain `local_only: true`.
 
 ### Access requirements
 
@@ -144,7 +210,8 @@ Tokens are read from the environment and are never written into corpus records.
 
 ## Acquisition receipts
 
-Every CLI run writes an atomic, uniquely identified attempt receipt under
+Every explicit source-adapter acquisition run writes an atomic, uniquely identified
+attempt receipt under
 `<output>/_provenance/runs/<fingerprint>/`. The fingerprint covers the public
 acquisition contract, adapter identity, sanitized target, an opaque target identity
 hash, limit, adapter schema, and non-secret behavior options. `latest.json` indexes the newest attempt, while
@@ -166,6 +233,11 @@ variables are never serialized intentionally.
 exist. Changed targets, limits, adapters, missing files, partial runs, and malformed
 receipts execute again. `--refresh` always executes and is mutually exclusive with
 `--resume`.
+
+Bounded site collections and browser renders write separate immutable receipts. Media
+and browser assets write a verifiable asset manifest, package imports write an import
+receipt, and evidence indexes write a content-addressed index manifest. Read-only source
+checks and queries do not create acquisition receipts.
 
 ## The record contract
 
@@ -204,8 +276,16 @@ fill today.
 ```text
 harness/
   acquisition.py     deterministic run receipts and opt-in resume
+  assets.py           inert content-addressed asset storage and manifests
   base.py            CorpusItem, atomic writer, polite HTTP, robots helper
+  browser.py          optional renderer with transport-fulfilled network access
   cli.py             corpus-harness command
+  crawl.py           bounded same-origin frontier and site collection
+  evidence/          deterministic local text/image retrieval and verification
+  media.py           explicit-consent direct media acquisition
+  rights.py          rights, authorization, access, and local-only declarations
+  source_gates.py    public-vs-export-required source classification
+  source_package.py  pattern-checked export discovery, import, and verification
   transport.py       DNS-pinned, redirect-safe, byte-bounded HTTP(S)
   url_safety.py      URL validation, canonicalization, and redaction
   scrapers/          one explicit adapter per source surface
@@ -226,20 +306,16 @@ python -m twine check dist/*
 
 ### Capability boundary
 
-This project shares acquisition design principles with the Atelier corpus pipeline, but
-it is not a public mirror of the whole Atelier factory.
+The public package includes explicit source adapters, bounded crawling, controlled
+rendering, rights-aware assets and media, verifiable export-package import, and a local
+evidence index. Heavy browser and image dependencies remain optional.
 
-| In this package | Deliberately outside the core |
-|---|---|
-| Explicit source adapters | Factory pack orchestration and GRID synthesis |
-| Provenance records and run receipts | Vector or multimodal retrieval |
-| Safe static HTTP transport | Browser automation and overlay interaction |
-| Deterministic resume and exact outcomes | Managed scraping services |
-| Portable Markdown and JSON | Account-bound acquisition or access bypass |
-
-Future crawl, browser, media, and asset adapters must remain optional and cannot land
-until their transport, consent, rights, byte-budget, and offline-test contracts are
-explicit.
+It does not include credential capture, cookie replay, browser-profile import, login or
+paywall automation, CAPTCHA solving, stealth behavior, consent auto-acceptance, or
+remote model egress. Account-bound sources cross the public boundary only as declared
+exports whose paths, hashes, sizes, policies, and recognized credential/session patterns
+can be checked. Pattern checks reduce accidental leakage; they are not a proof that an
+export contains no sensitive data.
 
 ## Contributing and governance
 

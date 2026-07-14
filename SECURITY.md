@@ -32,3 +32,14 @@ must remain within systems you own or have explicit permission to test.
 Adapter platform identifiers are validated as a single lowercase path segment, and the
 writer verifies the resolved platform directory remains directly beneath the configured
 output root. Report any path-containment bypass through the private channel above.
+
+Content-addressed assets use hash-only filenames and are never executed or unpacked.
+Source-package import rejects absolute and traversal paths, symlinks, special files,
+hash or size mismatches, credential-like fields, session artifacts, and configured
+count or byte-limit overruns. Evidence indexes accept declared records and assets only;
+arbitrary directory contents are not swept implicitly.
+
+The optional renderer is not an unrestricted browser. Its integration contract aborts
+downloads, WebSockets, non-GET requests, popups, and service workers, and fulfills
+allowed responses through the same every-hop validated transport used by static fetches.
+It never auto-accepts consent or attempts access-control evasion.
