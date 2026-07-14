@@ -15,14 +15,34 @@ import re
 import subprocess
 import tempfile
 from typing import Callable, Iterable
+from urllib.parse import urlsplit
 
 from ..base import BaseScraper, CorpusItem
+from ..url_safety import assert_safe_public_url
 
 # A runner is (args:list[str]) -> (returncode, stdout, stderr); injected in tests.
 Runner = Callable[[list], "tuple[int, str, str]"]
 
 _TS_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3}\s*-->")
 _TAG_RE = re.compile(r"<[^>]+>")
+_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+}
+
+
+def _validated_youtube_target(value: str) -> str:
+    if _VIDEO_ID_RE.fullmatch(value):
+        return value
+    safe = assert_safe_public_url(value)
+    host = (urlsplit(safe).hostname or "").lower()
+    if host not in _YOUTUBE_HOSTS:
+        raise ValueError("YouTube adapter accepts only video IDs and official YouTube URLs")
+    return safe
 
 
 def vtt_to_text(vtt: str) -> str:
@@ -60,6 +80,9 @@ class YouTubeScraper(BaseScraper):
         self.ytdlp_bin = ytdlp_bin
         self.sub_lang = sub_lang
 
+    def acquisition_options(self) -> dict[str, object]:
+        return {**super().acquisition_options(), "sub_lang": self.sub_lang}
+
     def _default_run(self, args: list) -> "tuple[int, str, str]":
         proc = subprocess.run(  # noqa: S603 — args is a fixed list, no shell
             [self.ytdlp_bin, *args], capture_output=True, text=True, timeout=180
@@ -76,6 +99,8 @@ class YouTubeScraper(BaseScraper):
     def fetch_video(
         self, url_or_id: str, *, info_json: dict | None = None, vtt_text: str | None = None
     ) -> "CorpusItem | None":
+        if info_json is None or vtt_text is None:
+            url_or_id = _validated_youtube_target(url_or_id)
         if info_json is None:
             code, out, _ = self._runner(["--dump-json", "--skip-download", url_or_id])
             if code != 0 or not out.strip():

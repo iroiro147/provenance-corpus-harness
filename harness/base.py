@@ -9,22 +9,31 @@ from __future__ import annotations
 
 import hashlib
 import html
+import os
 import re
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
-from urllib.parse import urlparse
-from urllib.robotparser import RobotFileParser
 
 import requests
 import yaml
 
-USER_AGENT = (
-    "provenance-corpus-harness/0.1 (policy-conscious corpus collection; "
-    "+https://github.com/iroiro147/provenance-corpus-harness)"
+from .constants import USER_AGENT
+from .transport import (
+    HttpResponse,
+    HttpStatusError,
+    ResponseTooLargeError,
+    SafeHttpTransport,
+)
+from .url_safety import (
+    UnsafeUrlError,
+    redact_sensitive_text,
+    sanitize_metadata,
+    sanitize_url_for_persistence,
 )
 
 # ---------------------------------------------------------------------------
@@ -76,23 +85,34 @@ class CorpusItem:
     date: str = ""  # ISO-ish date of the *content* (not scrape time)
     body: str = ""  # the prose (clean text / light markdown)
     extra: dict = field(default_factory=dict)  # platform metadata (engagement, ids…)
+    canonical_url: str = ""
+    source_profile: str = ""
 
     def content_hash(self) -> str:
         return hashlib.sha256(self.body.strip().encode("utf-8")).hexdigest()
 
 
-def write_corpus_item(
+@dataclass(frozen=True)
+class WriteResult:
+    """Exact outcome for one attempted corpus write."""
+
+    outcome: str
+    path: Path | None
+    content_hash: str
+
+
+def write_corpus_item_result(
     item: CorpusItem, out_dir: str | Path, *, scraped_at: str | None = None
-) -> Path | None:
+) -> WriteResult:
     """
     Write one CorpusItem to ``<out_dir>/<platform>/<slug>.md``.
 
-    Returns the path written, or None when skipped (empty body, or an identical
-    content_hash already on disk at that slug (light idempotent dedup).
+    Returns an exact written, duplicate, or empty outcome. A duplicate requires
+    both the same sanitized source URL and the same verified body hash.
     """
     body = (item.body or "").strip()
     if not body:
-        return None
+        return WriteResult("empty", None, item.content_hash())
 
     if not isinstance(item.platform, str) or not _PLATFORM_RE.fullmatch(item.platform):
         raise ValueError(
@@ -107,41 +127,105 @@ def write_corpus_item(
     if out.parent != root:
         raise ValueError("platform output directory escapes the configured output root")
     out.mkdir(parents=True, exist_ok=True)
-    slug = slugify(item.title or item.source_url)
+    safe_source_url = sanitize_url_for_persistence(item.source_url)
+    safe_title = str(sanitize_metadata(item.title))
+    safe_author = str(sanitize_metadata(item.author))
+    safe_date = str(sanitize_metadata(item.date))
+    safe_profile = str(sanitize_metadata(item.source_profile))
+    slug = slugify(safe_title or safe_source_url)
     path = out / f"{slug}.md"
     chash = item.content_hash()
 
-    # Idempotent dedup: same slug + same content already written → skip.
-    if path.exists():
-        existing = path.read_text(encoding="utf-8", errors="ignore")
-        m = re.search(r"^content_hash:\s*([0-9a-f]{64})", existing, flags=re.M)
-        if m and m.group(1) == chash:
-            return None
-        # Same slug, different content → disambiguate by a short hash suffix.
-        path = out / f"{slug}-{chash[:8]}.md"
-
     front = {
         "platform": item.platform,
-        "source_url": item.source_url,
-        "title": item.title,
-        "author": item.author,
-        "date": item.date,
+        "source_url": safe_source_url,
+        "title": safe_title,
+        "author": safe_author,
+        "date": safe_date,
         "scraped_at": timestamp,
         "content_hash": chash,
     }
+    if item.canonical_url:
+        front["canonical_url"] = sanitize_url_for_persistence(item.canonical_url)
+    if safe_profile:
+        front["source_profile"] = safe_profile
     if item.extra:
-        front["extra"] = item.extra
+        front["extra"] = sanitize_metadata(item.extra)
     fm = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
 
     doc = f"---\n{fm}\n---\n\n"
-    if item.title:
-        doc += f"# {item.title}\n\n"
+    if safe_title:
+        doc += f"# {safe_title}\n\n"
     doc += body + "\n"
 
-    tmp = path.with_suffix(".md.tmp")
-    tmp.write_text(doc, encoding="utf-8")
-    tmp.replace(path)  # atomic
-    return path
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=out, prefix=f".{slug}-", suffix=".tmp", delete=False
+    ) as handle:
+        handle.write(doc)
+        handle.flush()
+        os.fsync(handle.fileno())
+        temporary = Path(handle.name)
+
+    try:
+        # Hard-link publication is atomic and cannot overwrite an existing path,
+        # even when concurrent writers selected the same candidate.
+        suffix_length = 8
+        while True:
+            if path.exists() or path.is_symlink():
+                existing = None if path.is_symlink() else _existing_identity(path)
+                if existing == (safe_source_url, chash):
+                    return WriteResult("duplicate", path, chash)
+                path = out / f"{slug}-{chash[:suffix_length]}.md"
+                suffix_length += 4
+                if suffix_length > len(chash):
+                    raise RuntimeError(
+                        f"could not allocate a collision-safe record path for {slug}"
+                    )
+                continue
+            try:
+                os.link(temporary, path)
+                return WriteResult("written", path, chash)
+            except FileExistsError:
+                continue
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_corpus_item(
+    item: CorpusItem, out_dir: str | Path, *, scraped_at: str | None = None
+) -> Path | None:
+    """Backward-compatible wrapper returning only the path written."""
+
+    result = write_corpus_item_result(item, out_dir, scraped_at=scraped_at)
+    return result.path if result.outcome == "written" else None
+
+
+def _existing_identity(path: Path) -> tuple[str, str] | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="strict")
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return None
+        front = yaml.safe_load(parts[1])
+        if not isinstance(front, dict):
+            return None
+        source_url = front.get("source_url")
+        content_hash = front.get("content_hash")
+        if isinstance(source_url, str) and re.fullmatch(r"[0-9a-f]{64}", str(content_hash)):
+            rendered_body = parts[2].lstrip("\n")
+            title = front.get("title")
+            if isinstance(title, str) and title:
+                heading = f"# {title}\n\n"
+                if not rendered_body.startswith(heading):
+                    return None
+                rendered_body = rendered_body[len(heading) :]
+            actual_hash = hashlib.sha256(rendered_body.strip().encode("utf-8")).hexdigest()
+            if actual_hash != content_hash:
+                return None
+            return source_url, str(content_hash)
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return None
+    return None
 
 
 def _scraped_at_timestamp(value: str | None) -> str:
@@ -180,6 +264,7 @@ class PoliteSession:
         self._last = 0.0
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"})
+        self.transport = SafeHttpTransport()
 
     def _throttle(self) -> None:
         wait = self.min_interval - (time.monotonic() - self._last)
@@ -187,18 +272,40 @@ class PoliteSession:
             time.sleep(wait)
         self._last = time.monotonic()
 
-    def get(self, url: str, **kw) -> requests.Response:
+    def get(self, url: str, **kw) -> HttpResponse:
+        request_headers = dict(self.session.headers)
+        request_headers.update(kw.pop("headers", {}) or {})
+        timeout = kw.pop("timeout", self.timeout)
+        max_bytes = kw.pop("max_bytes", 5 * 1024 * 1024)
+        max_redirects = kw.pop("max_redirects", 5)
+        if kw:
+            unsupported = ", ".join(sorted(kw))
+            raise TypeError(f"unsupported protected GET options: {unsupported}")
         last_err: Exception | None = None
         for attempt in range(self.retries + 1):
             self._throttle()
             try:
-                resp = self.session.get(url, timeout=self.timeout, **kw)
+                resp = self.transport.get(
+                    url,
+                    headers=request_headers,
+                    timeout=timeout,
+                    max_bytes=max_bytes,
+                    max_redirects=max_redirects,
+                )
                 resp.raise_for_status()
                 return resp
+            except (UnsafeUrlError, ResponseTooLargeError):
+                raise
+            except HttpStatusError as exc:
+                if 400 <= exc.status_code < 500 and exc.status_code not in {408, 429}:
+                    raise
+                last_err = exc
+                time.sleep(min(2**attempt, 5))
             except Exception as e:  # noqa: BLE001 — courteous retry on any transient error
                 last_err = e
                 time.sleep(min(2**attempt, 5))
-        raise RuntimeError(f"GET failed after {self.retries + 1} attempts: {url}: {last_err}")
+        message = f"GET failed after {self.retries + 1} attempts: {url}: {last_err}"
+        raise RuntimeError(redact_sensitive_text(message))
 
     def get_json(self, url: str, **kw):
         return self.get(url, **kw).json()
@@ -206,34 +313,19 @@ class PoliteSession:
     def get_text(self, url: str, **kw) -> str:
         return self.get(url, **kw).text
 
+    def robots_allows(self, url: str, *, fail_open: bool = True) -> bool:
+        self._throttle()
+        return self.transport.robots_allows(url, fail_open=fail_open)
 
-_robots_cache: dict[str, RobotFileParser | None] = {}
+
+_safe_robots_transport = SafeHttpTransport()
 
 
 def robots_allows(url: str, user_agent: str = USER_AGENT) -> bool:
     """Return True iff robots.txt permits fetching `url` for `user_agent`.
     Fail-open on an unreachable/missing robots.txt (the courteous default for
     sites that simply don't publish one)."""
-    try:
-        parts = urlparse(url)
-        if not parts.scheme or not parts.netloc:
-            return True
-        base = f"{parts.scheme}://{parts.netloc}"
-        rp = _robots_cache.get(base, "__miss__")  # type: ignore[arg-type]
-        if rp == "__miss__":
-            parser = RobotFileParser()
-            parser.set_url(f"{base}/robots.txt")
-            try:
-                parser.read()
-                rp = parser
-            except Exception:  # noqa: BLE001
-                rp = None  # unreachable robots → fail-open
-            _robots_cache[base] = rp
-        if rp is None:
-            return True
-        return rp.can_fetch(user_agent, url)
-    except Exception:  # noqa: BLE001
-        return True
+    return _safe_robots_transport.robots_allows(url, user_agent=user_agent)
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +341,15 @@ class BaseScraper(ABC):
     """
 
     platform: str = "base"
+    adapter_schema_version: str = "1"
 
     @abstractmethod
     def scrape(self, target: str, limit: int = 25) -> Iterable[CorpusItem]: ...
+
+    def acquisition_options(self) -> dict[str, object]:
+        """Stable, non-secret options that affect adapter output."""
+
+        return {"adapter_schema_version": self.adapter_schema_version}
 
     def run(
         self,

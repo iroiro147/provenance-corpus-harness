@@ -15,6 +15,9 @@ specific source, jurisdiction, and purpose.
 - Use source-provided APIs and credentials where required, respect documented quotas,
   and stop when a source denies access.
 - Keep provenance metadata attached to collected records.
+- Never put credentials in a source URL. The harness rejects credentials before live
+  fetching and removes userinfo, fragments, and secret-bearing query fields before a URL
+  enters a record, receipt, or error message.
 
 ## Adapter review
 
@@ -30,10 +33,18 @@ specific source, jurisdiction, and purpose.
 
 ## Robots behavior
 
-The blog adapter checks `robots.txt` by default and skips an explicitly disallowed URL.
-The current helper treats a missing or unreachable robots file as inconclusive rather
+The blog adapter checks `robots.txt` by default through the same public-address-validated,
+redirect-safe transport used for article content and skips an explicitly disallowed URL.
+The current default treats a missing or unreachable robots file as inconclusive rather
 than an explicit prohibition. That technical behavior is not permission: the operator
 must still verify the source's terms and rights before collection.
+
+## Receipts are evidence, not permission
+
+An acquisition receipt proves what the tool attempted and wrote under a particular
+public configuration. It does not prove ownership, license, consent, or lawful reuse.
+Operators should keep their rights and retention decisions beside the corpus and review
+them independently of the technical receipt.
 
 ## Proposed adapters
 

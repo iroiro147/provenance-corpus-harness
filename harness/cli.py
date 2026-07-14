@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timezone
 
 from . import __version__
+from .acquisition import collect
 from .scrapers import SCRAPERS
 from .scrapers.blog import BlogScraper
 from .scrapers.github import GitHubScraper
@@ -15,6 +16,7 @@ from .scrapers.producthunt import ProductHuntScraper
 from .scrapers.reddit import RedditScraper
 from .scrapers.rss import RSSScraper
 from .scrapers.youtube import YouTubeScraper
+from .url_safety import redact_sensitive_text
 
 
 def _rss_platform_for(target: str) -> str:
@@ -64,20 +66,47 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--max-comments", type=int, default=10, help="hackernews: top comments per story"
     )
+    run_mode = p.add_mutually_exclusive_group()
+    run_mode.add_argument(
+        "--resume", action="store_true", help="reuse a matching complete acquisition receipt"
+    )
+    run_mode.add_argument(
+        "--refresh", action="store_true", help="run again even when a matching receipt exists"
+    )
     args = p.parse_args(argv)
 
     scraped_at = datetime.now(timezone.utc).isoformat()
     scraper = build_scraper(args.platform, args.target, args.max_comments)
     print(
-        f"[harness] {args.platform} ← {args.target} (limit {args.limit}) → {args.out}/",
+        f"[harness] {args.platform} ← {redact_sensitive_text(args.target)} "
+        f"(limit {args.limit}) → {args.out}/",
         file=sys.stderr,
     )
 
-    written = scraper.run(args.target, args.out, limit=args.limit, scraped_at=scraped_at)
+    try:
+        result = collect(
+            scraper,
+            args.target,
+            args.out,
+            limit=args.limit,
+            resume=args.resume,
+            refresh=args.refresh,
+            scraped_at=scraped_at,
+        )
+    except (TypeError, ValueError) as exc:
+        print(f"[harness] rejected: {redact_sensitive_text(str(exc))}", file=sys.stderr)
+        return 2
 
-    print(f"[harness] wrote {len(written)} corpus file(s)", file=sys.stderr)
-    for pth in written:
+    print(
+        f"[harness] {result.status}: wrote={result.written} duplicate={result.duplicates} "
+        f"empty={result.empty} failed={result.failed}",
+        file=sys.stderr,
+    )
+    for pth in result.paths:
         print(f"  {pth}")
-    if not written:
+    print(f"[harness] receipt: {result.receipt_path}", file=sys.stderr)
+    if not result.paths:
         print("[harness] nothing written (empty / robots-disallowed / duplicate).", file=sys.stderr)
-    return 0
+    if result.error:
+        print(f"[harness] {result.error}", file=sys.stderr)
+    return 1 if result.status in {"partial", "failed"} else 0

@@ -34,6 +34,9 @@ class RedditScraper(BaseScraper):
         self.fetch_json = fetch_json
         self.max_comments = max_comments
 
+    def acquisition_options(self) -> dict[str, object]:
+        return {**super().acquisition_options(), "max_comments": self.max_comments}
+
     def _parse_target(self, target: str) -> "tuple[str, str]":
         t = (target or "").strip().strip("/")
         if t.lower().startswith("r/"):

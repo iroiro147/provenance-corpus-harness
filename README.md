@@ -12,7 +12,8 @@ can explain which source produced which record.
 
 Provenance Corpus Harness treats provenance as part of the record—not an afterthought in
 a log file. Explicit source adapters produce portable Markdown with the source URL,
-collection time, content hash, and platform metadata beside the collected text.
+collection time, content hash, and platform metadata beside the collected text. Each run
+also produces a deterministic acquisition receipt with exact outcomes and relative paths.
 
 ```text
 FROM scraped text blobs
@@ -32,7 +33,7 @@ body changed, downstream enrichment only compounds the uncertainty.
 This harness makes that context a first-class contract:
 
 ```text
-source adapter -> CorpusItem -> <output>/<platform>/<slug>.md
+source adapter -> CollectionSpec -> CorpusItem -> record + acquisition receipt
 ```
 
 Every adapter is explicit. Every output is ordinary Markdown. Every collection path is
@@ -44,11 +45,16 @@ offline-testable with injected fetchers or runners.
   beside the content.
 - **Portable output** — Markdown and YAML frontmatter work with Git, static tools, search
   indexes, and downstream corpus pipelines.
-- **Change-aware writes** — identical bodies are skipped; changed bodies receive a stable
-  hash suffix instead of silently overwriting history.
+- **Change-aware writes** — only the same source plus the same body is a duplicate;
+  collisions receive a stable hash suffix instead of overwriting history.
 - **Bounded collection** — explicit adapters, clear authentication behavior, polite HTTP,
   robots checks where applicable, and no access-control evasion.
 - **Offline-testable adapters** — the test suite does not require live network access.
+- **Verifiable runs** — atomic JSON receipts distinguish written, duplicate, empty,
+  partial, failed, and explicitly resumed acquisitions.
+- **Safer remote fetches** — RSS and article fetches reject credentials and non-public
+  addresses, revalidate every redirect hop, pin the resolved address, cap response bytes,
+  and strip credentials on cross-origin redirects.
 
 ## Explicit source adapters
 
@@ -115,6 +121,12 @@ corpus-harness reddit r/programming/top --out corpus --limit 25
 
 # Product Hunt requires an official developer token
 PRODUCTHUNT_TOKEN=... corpus-harness producthunt featured --out corpus
+
+# Reuse a matching complete receipt without calling the adapter again
+corpus-harness rss https://example.com/feed.xml --out corpus --resume
+
+# Explicitly execute again even when a receipt already exists
+corpus-harness rss https://example.com/feed.xml --out corpus --refresh
 ```
 
 ### Access requirements
@@ -129,6 +141,31 @@ PRODUCTHUNT_TOKEN=... corpus-harness producthunt featured --out corpus
 | Product Hunt | `PRODUCTHUNT_TOKEN` or `PH_TOKEN` | Raises a clear configuration error |
 
 Tokens are read from the environment and are never written into corpus records.
+
+## Acquisition receipts
+
+Every CLI run writes an atomic, uniquely identified attempt receipt under
+`<output>/_provenance/runs/<fingerprint>/`. The fingerprint covers the public
+acquisition contract, adapter identity, sanitized target, an opaque target identity
+hash, limit, adapter schema, and non-secret behavior options. `latest.json` indexes the newest attempt, while
+`latest-complete.json` preserves the newest reusable success. Receipts contain only
+relative record paths; absolute targets and error paths are redacted, and environment
+variables are never serialized intentionally.
+
+```json
+{
+  "contract": "provenance-acquisition.v1",
+  "fingerprint": "<sha256>",
+  "status": "complete",
+  "counts": {"written": 2, "duplicates": 0, "empty": 1, "failed": 0},
+  "paths": ["rss/example-one.md", "rss/example-two.md"]
+}
+```
+
+`--resume` reuses only a matching `complete` receipt whose referenced files still
+exist. Changed targets, limits, adapters, missing files, partial runs, and malformed
+receipts execute again. `--refresh` always executes and is mutually exclusive with
+`--resume`.
 
 ## The record contract
 
@@ -152,9 +189,11 @@ extra:
 Collected prose.
 ```
 
-Writes are atomic. An identical body at the same slug is skipped; a changed body with
-the same slug receives a short hash suffix. Platform identifiers are restricted to one
-lowercase path segment, and resolved output paths must remain below the configured root.
+Writes are atomic. The same sanitized source URL and body hash is skipped; a distinct
+source or changed body with the same slug receives a hash suffix. Platform identifiers
+are restricted to one lowercase path segment, and resolved output paths must remain
+below the configured root. Userinfo, fragments, and secret-bearing URL query fields are
+removed before URLs enter records or receipts.
 Treat all collected text and metadata as untrusted input in downstream systems.
 
 The result is a corpus you can reason about later—not merely a directory you happened to
@@ -164,8 +203,11 @@ fill today.
 
 ```text
 harness/
+  acquisition.py     deterministic run receipts and opt-in resume
   base.py            CorpusItem, atomic writer, polite HTTP, robots helper
   cli.py             corpus-harness command
+  transport.py       DNS-pinned, redirect-safe, byte-bounded HTTP(S)
+  url_safety.py      URL validation, canonicalization, and redaction
   scrapers/          one explicit adapter per source surface
 tests/                offline tests with injected fetchers and fixtures
 ```
@@ -181,6 +223,23 @@ pytest -q
 python -m build
 python -m twine check dist/*
 ```
+
+### Capability boundary
+
+This project shares acquisition design principles with the Atelier corpus pipeline, but
+it is not a public mirror of the whole Atelier factory.
+
+| In this package | Deliberately outside the core |
+|---|---|
+| Explicit source adapters | Factory pack orchestration and GRID synthesis |
+| Provenance records and run receipts | Vector or multimodal retrieval |
+| Safe static HTTP transport | Browser automation and overlay interaction |
+| Deterministic resume and exact outcomes | Managed scraping services |
+| Portable Markdown and JSON | Account-bound acquisition or access bypass |
+
+Future crawl, browser, media, and asset adapters must remain optional and cannot land
+until their transport, consent, rights, byte-budget, and offline-test contracts are
+explicit.
 
 ## Contributing and governance
 

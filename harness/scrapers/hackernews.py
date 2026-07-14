@@ -39,6 +39,9 @@ class HackerNewsScraper(BaseScraper):
         self.fetch_json = fetch_json
         self.max_comments = max_comments
 
+    def acquisition_options(self) -> dict[str, object]:
+        return {**super().acquisition_options(), "max_comments": self.max_comments}
+
     def _item(self, item_id):
         return self.fetch_json(f"{HN_API}/item/{item_id}.json")
 
