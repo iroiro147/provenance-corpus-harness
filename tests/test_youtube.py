@@ -1,3 +1,5 @@
+import pytest
+
 from harness.scrapers.youtube import YouTubeScraper, vtt_to_text
 
 VTT = """WEBVTT
@@ -62,4 +64,25 @@ def test_fetch_video_offline_combines_description_and_transcript():
 
 def test_fetch_video_returns_none_on_dump_failure():
     yt = YouTubeScraper(run=lambda args: (1, "", "error"))
-    assert yt.fetch_video("bad") is None
+    assert yt.fetch_video("abc123XYZ_0") is None
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://example.com/video",
+        "https://user:pass@youtube.com/watch?v=abc123XYZ_0",
+        "https://youtube.com/watch?v=abc123XYZ_0&token=secret",
+    ],
+)
+def test_live_youtube_target_is_constrained_before_runner(target):
+    called = False
+
+    def runner(args):
+        nonlocal called
+        called = True
+        return 1, "", ""
+
+    with pytest.raises(ValueError):
+        YouTubeScraper(run=runner).fetch_video(target)
+    assert not called

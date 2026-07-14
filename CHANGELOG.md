@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Deterministic acquisition fingerprints plus immutable per-attempt receipts with exact
+  written, duplicate, empty, partial, failed, and resumed outcomes.
+- Opt-in `--resume` and explicit `--refresh` execution controls.
+- DNS-pinned HTTP transport with public-address validation on every redirect, response
+  byte limits, cross-origin credential stripping, and protected robots retrieval.
+- URL credential detection, secret-query sanitization, canonicalization, and error
+  redaction utilities.
+
+### Changed
+
+- RSS and blog defaults now use the protected transport instead of library-managed URL
+  fetching.
+- Deduplication now requires the same source URL and content hash, preserving identical
+  text collected from distinct sources.
+- Collision paths are validated repeatedly and never blindly overwritten.
+- Development version advanced to `0.2.0.dev0`; no v0.2 release has been published.
+
 ## [0.1.0] - 2026-07-14
 
 ### Added

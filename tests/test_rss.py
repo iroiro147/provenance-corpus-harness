@@ -1,6 +1,7 @@
 import feedparser
 
 from harness.scrapers.rss import RSSScraper
+from harness.transport import HttpResponse
 
 RSS = """<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -39,3 +40,13 @@ def test_rss_parses_entries_offline():
 def test_rss_limit():
     scraper = RSSScraper(parse=feedparser.parse)
     assert len(list(scraper.scrape(RSS, limit=1))) == 1
+
+
+def test_rss_default_parser_fetches_through_protected_transport():
+    class FakeTransport:
+        def get(self, url, **kwargs):
+            assert url == "https://example.com/feed.xml"
+            return HttpResponse(url, 200, {"Content-Type": "application/rss+xml"}, RSS.encode())
+
+    items = list(RSSScraper(transport=FakeTransport()).scrape("https://example.com/feed.xml"))
+    assert len(items) == 2

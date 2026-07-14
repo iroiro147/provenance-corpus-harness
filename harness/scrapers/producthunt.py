@@ -36,6 +36,9 @@ class ProductHuntScraper(BaseScraper):
         self.token = token or os.environ.get("PRODUCTHUNT_TOKEN") or os.environ.get("PH_TOKEN")
         self._fetch = fetch_graphql
 
+    def acquisition_options(self) -> dict[str, object]:
+        return {**super().acquisition_options(), "authenticated": bool(self.token)}
+
     def _post(self, query: str, variables: dict) -> dict:
         if self._fetch is not None:
             return self._fetch(query, variables)

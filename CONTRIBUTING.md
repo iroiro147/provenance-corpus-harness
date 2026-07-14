@@ -44,4 +44,10 @@ An adapter must:
 5. include an entry in `docs/SOURCE_POLICY.md`; and
 6. avoid treating technical accessibility as permission to collect or redistribute.
 
+Any adapter that opens remote URLs must use `SafeHttpTransport` or demonstrate an
+equivalent every-hop DNS, redirect, credential, timeout, and byte-budget contract. Do
+not delegate URL fetching to a parser or extraction library. New crawl, browser, media,
+or managed-service surfaces require a separate threat model and offline adversarial
+tests.
+
 By contributing, you agree that your contribution is licensed under Apache-2.0.

@@ -33,6 +33,13 @@ class GitHubScraper(BaseScraper):
         self.fetch_json = fetch_json
         self.max_releases = max_releases
 
+    def acquisition_options(self) -> dict[str, object]:
+        return {
+            **super().acquisition_options(),
+            "authenticated": bool(self.token),
+            "max_releases": self.max_releases,
+        }
+
     def scrape(self, target: str, limit: int = 10) -> Iterable[CorpusItem]:
         repos = [r.strip().strip("/") for r in (target or "").split(",") if r.strip()][
             : max(limit, 1)

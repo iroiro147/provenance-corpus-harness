@@ -10,18 +10,40 @@ from typing import Callable, Iterable
 
 import trafilatura
 
-from ..base import BaseScraper, CorpusItem, robots_allows
+from ..base import BaseScraper, CorpusItem, PoliteSession
+from ..transport import SafeHttpTransport, TransportError
 
 
 class BlogScraper(BaseScraper):
     platform = "blog"
 
     def __init__(
-        self, fetch_html: Callable[[str], "str | None"] | None = None, respect_robots: bool = True
+        self,
+        fetch_html: Callable[[str], "str | None"] | None = None,
+        respect_robots: bool = True,
+        transport: SafeHttpTransport | None = None,
     ):
         # `fetch_html` is injectable (tests pass downloaded HTML directly).
-        self.fetch_html = fetch_html or trafilatura.fetch_url
+        self.http = PoliteSession()
+        if transport is not None:
+            self.http.transport = transport
+        self.fetch_html = fetch_html or self._fetch_html
         self.respect_robots = respect_robots
+
+    def acquisition_options(self) -> dict[str, object]:
+        return {**super().acquisition_options(), "respect_robots": self.respect_robots}
+
+    def _fetch_html(self, url: str) -> str:
+        response = self.http.get(url)
+        if response.media_type and response.media_type not in {
+            "text/html",
+            "application/xhtml+xml",
+            "text/plain",
+        }:
+            raise TransportError(
+                f"article response has unsupported media type: {response.media_type}"
+            )
+        return response.text
 
     def scrape(self, target: str, limit: int = 10) -> Iterable[CorpusItem]:
         urls = [u.strip() for u in (target or "").split(",") if u.strip()][: max(limit, 1)]
@@ -32,7 +54,7 @@ class BlogScraper(BaseScraper):
 
     def extract(self, url: str, downloaded: "str | None" = None) -> "CorpusItem | None":
         if downloaded is None:
-            if self.respect_robots and not robots_allows(url):
+            if self.respect_robots and not self.http.robots_allows(url):
                 return None  # robots.txt disallows — skip, don't fetch
             downloaded = self.fetch_html(url)
         if not downloaded:
